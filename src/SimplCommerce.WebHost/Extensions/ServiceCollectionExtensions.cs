@@ -22,15 +22,12 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 using Newtonsoft.Json;
 using SimplCommerce.Infrastructure;
-using SimplCommerce.Infrastructure.Data;
 using SimplCommerce.Infrastructure.Modules;
 using SimplCommerce.Infrastructure.Web.ModelBinders;
-using SimplCommerce.Infrastructure.Web;
 using SimplCommerce.Module.Core.Data;
 using SimplCommerce.Module.Core.Extensions;
 using SimplCommerce.Module.Core.Models;
-using SimplCommerce.Infrastructure.Web.ModelBinders;
-using SimplCommerce.Infrastructure.Web;
+using Microsoft.AspNetCore.Mvc.ApplicationParts;
 
 namespace SimplCommerce.WebHost.Extensions
 {
@@ -56,16 +53,22 @@ namespace SimplCommerce.WebHost.Extensions
                     string content = reader.ReadToEnd();
                     dynamic moduleMetadata = JsonConvert.DeserializeObject(content);
                     module.Name = moduleMetadata.name;
+                    module.IsBundledWithHost = moduleMetadata.isBundledWithHost;
                 }
 
-                TryLoadModuleAssembly(moduleFolder.FullName, out Assembly moduleAssembly);
-
-                if (moduleAssembly == null)
+                if(!module.IsBundledWithHost)
                 {
-                    moduleAssembly = Assembly.Load(new AssemblyName(moduleFolder.Name));
+                    TryLoadModuleAssembly(moduleFolder.FullName, module);
+                    if (module.Assembly == null)
+                    {
+                        throw new Exception($"Cannot find main assembly for module {module.Id}");
+                    }
+                }
+                else
+                {
+                    module.Assembly = Assembly.Load(new AssemblyName(moduleFolder.Name));
                 }
 
-                module.Assembly = moduleAssembly;
                 GlobalConfiguration.Modules.Add(module);
                 RegisterModuleInitializerServices(module, ref services);
             }
@@ -82,7 +85,7 @@ namespace SimplCommerce.WebHost.Extensions
                 })
                 .AddRazorOptions(o =>
                 {
-                    foreach (var module in modules)
+                    foreach (var module in modules.Where(x => !x.IsBundledWithHost))
                     {
                         o.AdditionalCompilationReferences.Add(MetadataReference.CreateFromFile(module.Assembly.Location));
                     }
@@ -91,12 +94,31 @@ namespace SimplCommerce.WebHost.Extensions
                 .AddDataAnnotationsLocalization()
                 .SetCompatibilityVersion(CompatibilityVersion.Version_2_1); ;
 
-            foreach (var module in modules)
+            foreach (var module in modules.Where(x => !x.IsBundledWithHost))
             {
-                mvcBuilder.AddApplicationPart(module.Assembly);
+                AddApplicationPart(mvcBuilder, module.Assembly);
             }
 
             return services;
+        }
+
+        private static void AddApplicationPart(IMvcBuilder mvcBuilder, Assembly assembly)
+        {
+            var partFactory = ApplicationPartFactory.GetApplicationPartFactory(assembly);
+            foreach (var part in partFactory.GetApplicationParts(assembly))
+            {
+                mvcBuilder.PartManager.ApplicationParts.Add(part);
+            }
+
+            var relatedAssemblies = RelatedAssemblyAttribute.GetRelatedAssemblies(assembly, throwOnError: false);
+            foreach (var relatedAssembly in relatedAssemblies)
+            {
+                partFactory = ApplicationPartFactory.GetApplicationPartFactory(relatedAssembly);
+                foreach (var part in partFactory.GetApplicationParts(relatedAssembly))
+                {
+                    mvcBuilder.PartManager.ApplicationParts.Add(part);
+                }
+            }
         }
 
         public static IServiceCollection AddCustomizedIdentity(this IServiceCollection services, IConfiguration configuration)
@@ -185,13 +207,12 @@ namespace SimplCommerce.WebHost.Extensions
             return services;
         }
 
-        private static void TryLoadModuleAssembly(string moduleFolderPath, out Assembly moduleMainAssembly)
+        private static void TryLoadModuleAssembly(string moduleFolderPath, ModuleInfo module)
         {
             const string binariesFolderName = "bin";
             var binariesFolderPath = Path.Combine(moduleFolderPath, binariesFolderName);
             var binariesFolder = new DirectoryInfo(binariesFolderPath);
 
-            moduleMainAssembly = null;
             if (Directory.Exists(binariesFolderPath))
             {
                 foreach (var file in binariesFolder.GetFileSystemInfos("*.dll", SearchOption.AllDirectories))
@@ -221,9 +242,9 @@ namespace SimplCommerce.WebHost.Extensions
                         }
                     }
 
-                    if (assembly.FullName.Contains(Path.GetFileNameWithoutExtension(moduleFolderPath)))
+                    if (Path.GetFileNameWithoutExtension(assembly.ManifestModule.Name) == module.Id)
                     {
-                        moduleMainAssembly = assembly;
+                        module.Assembly = assembly;
                     }
                 }
             }

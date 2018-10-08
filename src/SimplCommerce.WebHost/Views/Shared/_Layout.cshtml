@@ -20,8 +20,8 @@
     <div class="top-bar">
         <div class="container">
             <ul class="nav justify-content-end">
-                @await Html.PartialAsync("_SelectLanguagePartial")
-                @await Html.PartialAsync("_LoginPartial")
+                <partial name="_SelectLanguagePartial" />
+                <partial name="_LoginPartial" />
             </ul>
         </div>
     </div>
@@ -29,7 +29,7 @@
         <div class="container">
             <div class="row">
                 <div class="col-12 col-md-6 col-lg-4 logo">
-                    <a asp-controller="Home" asp-action="Index">
+                    <a asp-area="Core" asp-controller="Home" asp-action="Index">
                         <img alt="SimplCommerce" src="~/modules/core/Logo_SimplCommerce.png" />
                     </a>
                 </div>
@@ -113,6 +113,6 @@
     <script simpl-append-version="true" src="~/modules/wishlist/wishlist.js"></script>
     @RenderSection("scripts", required: false)
 
-    @await Html.PartialAsync("_AnalyticsScript")
+    <partial name="_AnalyticsScript" />
 </body>
 </html>
